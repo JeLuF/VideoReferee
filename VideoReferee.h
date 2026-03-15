@@ -16,6 +16,7 @@
 #include <opencv2/opencv.hpp>
 
 #include <atomic>
+#include <functional>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,9 @@ public:
 
     // Called from UI thread — capture loop will rotate at next frame boundary
     void requestRotate(const QString &newOutputPath);
+    void pauseRecording();
+    void resumeRecording(const QString &newOutputPath);
+    bool isRecordingPaused() const { return m_recordingPaused; }
 
 public slots:
     void start();
@@ -43,11 +47,14 @@ signals:
     void rotationDone(const QString &closedPath); // old file is closed & complete
     void finished();
     void errorOccurred(const QString &message);
+    void pauseDone(const QString &closedPath);
 
 private:
     QString           m_outputPath;
     int               m_cameraIndex;
     std::atomic<bool> m_running{false};
+    bool              m_recordingPaused = false;
+    QString           m_resumePath;   // non-empty = resume pending
 
     // Rotation request: set atomically from UI thread, consumed by capture thread
     QMutex  m_rotateMutex;
@@ -80,12 +87,15 @@ private slots:
     void onCaptureError(const QString &message);
     void onSwitchCamera();
     void onRotateFiles();   // F1 handler
+    void onPauseDone(const QString &closedPath);
+
 
     // ---- TCP API ----
     void onNewTcpConnection();
     void onTcpClientData();
     void onTcpClientDisconnected();
     void onStatusTimer();
+    void onCaptureThreadFinished();   // async stopCapture completion
 
 private:
     // ---- UI ----
@@ -101,8 +111,10 @@ private:
 
     void startCapture(int cameraIndex, const QString &outputPath);
     void stopCapture();
+    void stopCaptureAsync(std::function<void()> onDone = nullptr);
     QString newRecordingPath() const;
-
+    static int showCameraDialog(QWidget *parent, const QString &title, int currentIndex = -1);
+    
     // ---- Frame index for current file ----
     QMutex              m_indexMutex;
     std::vector<qint64> m_frameIndex;
@@ -145,6 +157,9 @@ private:
     QString currentStatusLine() const;
 
     // ---- Helpers ----
+    // Callback invoked on UI thread when async stop completes
+    std::function<void()> m_pendingAfterStop;
+
     QImage  readFrameAt(qint64 filePos);
     void    spawnTranscode(const QString &sourcePath);
     void    enterReplay();
